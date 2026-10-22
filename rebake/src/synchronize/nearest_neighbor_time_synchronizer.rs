@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use polars::datatypes::{DataType, PlSmallStr};
 use polars::prelude::{
     AsofStrategy, ChunkedArray, Column, DataFrame, DataFrameJoinOps, Expr, IntoLazy, JoinArgs,
-    JoinType, LazyFrame, SortMultipleOptions, UInt64Type, col, when,
+    JoinType, LazyFrame, UInt64Type, col, when,
 };
 use serde::{Deserialize, Serialize};
 
@@ -221,18 +221,6 @@ impl TimeSynchronizer for NearestNeighborTimeSynchronizer {
 
     fn set_timestamp_index(&mut self, index: HashMap<String, ChunkedArray<UInt64Type>>) {
         self.timestamp_index = Some(index);
-    }
-
-    fn collect_source(&self, lazy_frame: &LazyFrame) -> StageResult<DataFrame> {
-        let collected = lazy_frame
-            .clone()
-            .collect()
-            .with_context("failed to collect source frame for nearest neighbor synchronization")?;
-        collected
-            .sort([ORIGINAL_TIMESTAMP_COL], SortMultipleOptions::default())
-            .or_invalid(&format!(
-                "failed to sort source frame by '{ORIGINAL_TIMESTAMP_COL}'"
-            ))
     }
 
     fn align_topic(

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use polars::prelude::{
     AsofJoin, AsofStrategy, ChunkAgg, ChunkedArray, Column, DataFrame, IntoLazy, LazyFrame,
-    NamedFrom, Series, UInt64Type, col, df, lit,
+    NamedFrom, Series, SortMultipleOptions, UInt64Type, col, df, lit,
 };
 
 use crate::core::error::{OptionExt, PolarsExt, ResultExt, StageError, StageResult};
@@ -128,11 +128,18 @@ pub trait TimeSynchronizer {
         Ok((aligned.lazy(), excluded.lazy()))
     }
 
+    /// Collect a topic frame sorted by its original timestamp. The as-of join in
+    /// `join_asof_with_strategy` skips Polars' sortedness check, and sources are not
+    /// guaranteed to be sorted (`/tf_buffer` comes from a plain `group_by`).
     fn collect_source(&self, frame: &LazyFrame) -> StageResult<DataFrame> {
         frame
             .clone()
             .collect()
-            .with_context("failed to collect source frame for synchronization")
+            .with_context("failed to collect source frame for synchronization")?
+            .sort([ORIGINAL_TIMESTAMP_COL], SortMultipleOptions::default())
+            .or_invalid(&format!(
+                "failed to sort source frame by '{ORIGINAL_TIMESTAMP_COL}'"
+            ))
     }
 
     fn align_topic(

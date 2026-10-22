@@ -250,6 +250,48 @@ mod tests {
         );
     }
 
+    /// Sources are not guaranteed to arrive sorted (e.g. `/tf_buffer` is built with a
+    /// plain `group_by`), so the as-of join must not depend on input order.
+    #[test]
+    fn zero_order_hold_handles_unsorted_source() {
+        let topic = "topic".to_string();
+        let shuffled = df! {
+            ORIGINAL_TIMESTAMP_COL => &[
+                1_200_000_000_u64,
+                400_000_000,
+                2_050_000_000,
+                900_000_000,
+                650_000_000,
+                1_900_000_000,
+            ],
+            "value" => &[26_i32, 9, 34, 21, 15, 30],
+        }
+        .unwrap();
+
+        let mut frames = HashMap::new();
+        frames.insert(topic.clone(), shuffled.lazy());
+
+        let synced = ZeroOrderHoldTimeSynchronizer::new(4)
+            .synchronize(frames)
+            .unwrap();
+
+        assert_topic(
+            &synced,
+            &topic,
+            &[
+                400_000_000,
+                650_000_000,
+                900_000_000,
+                1_150_000_000,
+                1_400_000_000,
+                1_650_000_000,
+                1_900_000_000,
+            ],
+            &[9, 15, 21, 21, 26, 26, 30],
+            &[true, true, true, false, true, false, true],
+        );
+    }
+
     fn assert_topic(
         synced: &HashMap<String, LazyFrame>,
         topic: &String,
