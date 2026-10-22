@@ -149,9 +149,17 @@ impl Stage for TimestampMergeTimeSynchronizer {
 
         let mut synched_dfs = HashMap::new();
         for (path, lf) in dataset {
-            let original_df = lf.clone().collect().with_context(format!(
-                "failed to collect topic '{path}' for synchronization"
-            ))?;
+            // The as-of join skips Polars' sortedness check, so sort explicitly.
+            let original_df = lf
+                .clone()
+                .collect()
+                .with_context(format!(
+                    "failed to collect topic '{path}' for synchronization"
+                ))?
+                .sort([ORIGINAL_TIMESTAMP_COL], SortMultipleOptions::default())
+                .or_invalid(&format!(
+                    "failed to sort topic '{path}' by '{ORIGINAL_TIMESTAMP_COL}'"
+                ))?;
             let target_column = merged_timestamps_df
                 .column(SYNCHED_TIMESTAMP_COL)
                 .or_invalid(&format!(
@@ -259,5 +267,28 @@ mod tests {
         }
         .unwrap();
         polars_testing::assert_dataframe_equal!(&topic_b_frame, &expected_topic_b);
+    }
+
+    #[test]
+    fn merges_unsorted_sources() {
+        let topic_a = build_topic_frame(&[400, 100, 200], "value_a", &[4, 1, 2]);
+        let topic_b = build_topic_frame(&[350, 150, 250], "value_b", &[30, 10, 20]);
+        let dataset = HashMap::from([
+            ("/topic_a".to_string(), topic_a),
+            ("/topic_b".to_string(), topic_b),
+        ]);
+
+        let mut synchronizer = TimestampMergeTimeSynchronizer::new();
+        let context = synchronizer.run(Context::new(dataset)).unwrap();
+        let result = context.dataset.expect("synchronized dataset must exist");
+
+        let topic_a_frame = result.get("/topic_a").unwrap().clone().collect().unwrap();
+        let expected_topic_a = df! {
+            SYNCHED_TIMESTAMP_COL => &[150_u64, 200, 250, 350, 400],
+            ORIGINAL_TIMESTAMP_COL => &[100_u64, 200, 200, 200, 400],
+            "value_a" => &[1_i32, 2, 2, 2, 4],
+        }
+        .unwrap();
+        polars_testing::assert_dataframe_equal!(&topic_a_frame, &expected_topic_a);
     }
 }
